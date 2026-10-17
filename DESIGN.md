@@ -1,7 +1,7 @@
 # observ: design
 
-Status: draft for review. This describes the app as agreed in discussion and replaces the
-first prototype's behaviour where they differ.
+Status: agreed. This describes the app as agreed in discussion and replaces the first
+prototype's behaviour where they differ.
 
 ## 1. Purpose
 
@@ -127,7 +127,7 @@ usually only the last digit or two need adjusting. The layout follows the global
 - Item list, newest first, each with its test time. Inactive items are smaller and dimmed;
   they must be reactivated before anything else can be done with them.
 - Tapping an active item opens it: view the photo, play the video or audio, edit the note
-  text, deactivate, or **add a sync** (MARK, PHOTO, VIDEO).
+  text (no trace is kept), deactivate, or **add a sync** (MARK, PHOTO, VIDEO).
 
 ### 6.3 Add sync
 - **From a MARK**: wheels only. Intended use: watch the external clock, tap MARK exactly as
@@ -184,21 +184,21 @@ text files are generated from it.
 ## 8. Export
 
 Zip of the whole Test folder (all media, inactive items included, both text files) saved to
-`Downloads/observ/<test name>.zip`, then the share sheet opens. Only active Tests can be
-exported. The Test records when it was last exported.
+`Downloads/observ/`, then the share sheet opens. Only active Tests can be exported.
+
+- The first export is named `<test name>.zip`; later exports of the same Test get a version
+  field: `<test name>_v.2.zip`, `<test name>_v.3.zip`, … (matching `v\.\d+`).
+- The Test records its export count and whether it has **changed since the last export**. Any
+  change to items, syncs, readings, note text or active state counts; the global format
+  switch does not.
 
 ## 9. Deleting a Test
 
 The only permanent deletion. Allowed when the Test is **inactive**, or has been **exported and
-not changed since**. Asks for confirmation (this is irreversible, unlike everything else).
+not changed since** the last export. Always asks for confirmation, since this is the one
+irreversible action.
 
 ## 10. Not in scope
 
 NTP sync; drift correction or linear fitting; syncs from notes or audio; tenths of a second in
 readings; change history; multiple phones sharing a Test; landscape layout; translations.
-
-## 11. Open points
-
-1. Note text editable after saving (assumed yes, without trace)?
-2. Delete rule "exported and not changed since": OK, or is "exported at least once" enough?
-3. Delete confirmation dialog: OK, since deletion is the one irreversible action?
