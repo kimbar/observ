@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple stopwatch icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#1565C0" android:pathData="M24,0a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M21,7h6v3h-6z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M24,11a14,14 0,1 1,0 28a14,14 0,1 1,0 -28zM24,14a11,11 0,1 0,0 22a11,11 0,1 0,0 -22z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M22.5,16h3v9.4l5.6,3.3 -1.5,2.6 -7.1,-4.2z" />
+</vector>
