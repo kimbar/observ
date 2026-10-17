@@ -119,9 +119,19 @@ usually only the last digit or two need adjusting. The layout follows the global
 ### 6.2 Test
 - Top: big **test clock** (or "not synced"), local time small beneath it, the format switch,
   and a **Syncs** button showing the count of active syncs and their spread.
-- Camera preview with a front/back switch.
-- Buttons: **PHOTO**, **VIDEO** (start/stop), **AUDIO** (start/stop), **MARK**.
-  PHOTO and MARK fire on finger-down. Audio and video recording exclude each other.
+- A **Camera** button opens and closes the camera view. The two modes:
+
+  | | Camera closed (default) | Camera open |
+  |---|---|---|
+  | Shown | note field, **AUDIO** (start/stop), **MARK** | preview, **PHOTO**, **VIDEO** (start/stop), **MARK**, lens switches |
+  | Hidden | preview, PHOTO, VIDEO | note field, AUDIO |
+
+  MARK is available in both modes, for sudden events.
+- The camera cannot be opened while audio is recording, and cannot be closed while video is
+  recording, so a running recording always has its stop button on screen.
+- Lens switches: **front / back**, and **normal / wide** (ultra-wide) where the phone exposes
+  more than one back camera; the wide switch is hidden otherwise. No zoom control.
+- PHOTO and MARK fire on finger-down.
 - Note field: the note's time is pinned at the first keystroke (or to the preceding MARK)
   and shown next to the field.
 - Item list, newest first, each with its test time. Inactive items are smaller and dimmed;
@@ -201,4 +211,4 @@ irreversible action.
 ## 10. Not in scope
 
 NTP sync; drift correction or linear fitting; syncs from notes or audio; tenths of a second in
-readings; change history; multiple phones sharing a Test; landscape layout; translations.
+readings; change history; multiple phones sharing a Test; camera zoom; landscape layout; translations.
