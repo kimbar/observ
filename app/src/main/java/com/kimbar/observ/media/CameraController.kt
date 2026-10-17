@@ -5,10 +5,14 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
+import android.hardware.camera2.CameraCharacteristics
 import android.os.SystemClock
 import android.view.OrientationEventListener
 import android.view.Surface
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -24,28 +28,40 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.atan
 
 /**
- * Wraps CameraX: preview, still capture and video recording, with timing.
+ * Wraps CameraX: preview, still capture and video recording, with timing, plus the
+ * front/back and normal/wide lens switches (DESIGN.md 6.2).
  *
  * Photo time is the sensor timestamp of the frame (start of exposure), not the button press.
  * Video start is estimated from recorder status events as (event time - recorded duration),
- * taking the earliest estimate; it can be late by the encoder latency (typically tens of ms).
- * Video sync against a filmed clock cancels that bias for later videos.
+ * taking the earliest estimate; it can be late by the encoder latency (tens of ms).
  */
 class CameraController(private val context: Context) {
 
-    data class Photo(val file: File, val exposureElapsedNanos: Long, val pressElapsedNanos: Long)
-    data class Video(val file: File, val startElapsedNanos: Long, val endElapsedNanos: Long, val error: String?)
+    data class Photo(val file: File, val exposureCounterNs: Long)
+    data class Video(val file: File, val startCounterNs: Long, val durationNs: Long, val error: String?)
+
+    /** How "wide" is reached on this phone, if at all. */
+    private sealed interface WideMode {
+        data class Zoom(val ratio: Float) : WideMode
+        data class SeparateCamera(val info: CameraInfo) : WideMode
+    }
 
     private val mainExecutor = ContextCompat.getMainExecutor(context)
     private var provider: ProcessCameraProvider? = null
+    private var owner: LifecycleOwner? = null
     private var camera: Camera? = null
+    private var wideMode: WideMode? = null
     private val preview = Preview.Builder().build()
     private val imageCapture = ImageCapture.Builder()
         .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
@@ -56,7 +72,13 @@ class CameraController(private val context: Context) {
     private val videoCapture = VideoCapture.withOutput(recorder)
     private var recording: Recording? = null
 
-    var lensFacing = CameraSelector.LENS_FACING_BACK
+    var front by mutableStateOf(false)
+        private set
+    var wide by mutableStateOf(false)
+        private set
+    var wideAvailable by mutableStateOf(false)
+        private set
+    var isRecording by mutableStateOf(false)
         private set
 
     private val orientationListener = object : OrientationEventListener(context) {
@@ -74,12 +96,14 @@ class CameraController(private val context: Context) {
     }
 
     fun bind(owner: LifecycleOwner, view: PreviewView, onError: (String) -> Unit) {
+        this.owner = owner
         preview.surfaceProvider = view.surfaceProvider
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             try {
                 provider = future.get()
-                rebind(owner)
+                rebind()
+                detectWide()
                 orientationListener.enable()
             } catch (e: Exception) {
                 onError("Camera unavailable: ${e.message}")
@@ -87,18 +111,65 @@ class CameraController(private val context: Context) {
         }, mainExecutor)
     }
 
-    private fun rebind(owner: LifecycleOwner) {
+    private fun rebind() {
         val p = provider ?: return
+        val o = owner ?: return
         p.unbindAll()
-        val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-        camera = p.bindToLifecycle(owner, selector, preview, imageCapture, videoCapture)
+        val mode = wideMode
+        val selector = when {
+            front -> CameraSelector.DEFAULT_FRONT_CAMERA
+            wide && mode is WideMode.SeparateCamera ->
+                CameraSelector.Builder().addCameraFilter { list -> list.filter { it == mode.info } }.build()
+            else -> CameraSelector.DEFAULT_BACK_CAMERA
+        }
+        val cam = p.bindToLifecycle(o, selector, preview, imageCapture, videoCapture)
+        camera = cam
+        val ratio = if (!front && wide && mode is WideMode.Zoom) mode.ratio else 1f
+        cam.cameraControl.setZoomRatio(ratio)
     }
 
-    fun switchLens(owner: LifecycleOwner) {
+    /**
+     * Wide is either a zoom ratio below 1 on the main back camera (logical multi-camera, most
+     * current phones) or a separate back camera with a clearly wider field of view.
+     */
+    @androidx.annotation.OptIn(markerClass = [ExperimentalCamera2Interop::class])
+    private fun detectWide() {
+        val p = provider ?: return
+        val min = camera?.takeIf { !front }?.cameraInfo?.zoomState?.value?.minZoomRatio
+        wideMode = if (min != null && min < 0.95f) {
+            WideMode.Zoom(min)
+        } else {
+            runCatching {
+                val backs = p.availableCameraInfos.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+                val main = CameraSelector.DEFAULT_BACK_CAMERA.filter(backs).firstOrNull()
+                fun fov(info: CameraInfo): Double? {
+                    val c = Camera2CameraInfo.from(info)
+                    val focal = c.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+                    val size = c.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                    if (focal == null || size == null || focal <= 0f) return null
+                    return 2 * atan(size.width / (2.0 * focal))
+                }
+                val mainFov = main?.let { fov(it) } ?: return@runCatching null
+                backs.filter { it != main }
+                    .mapNotNull { info -> fov(info)?.let { info to it } }
+                    .filter { it.second > mainFov * 1.2 }
+                    .maxByOrNull { it.second }
+                    ?.let { WideMode.SeparateCamera(it.first) }
+            }.getOrNull()
+        }
+        wideAvailable = wideMode != null
+    }
+
+    fun toggleFront() {
         if (recording != null) return
-        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) CameraSelector.LENS_FACING_FRONT
-        else CameraSelector.LENS_FACING_BACK
-        rebind(owner)
+        front = !front
+        rebind()
+    }
+
+    fun toggleWide() {
+        if (recording != null || front || wideMode == null) return
+        wide = !wide
+        rebind()
     }
 
     fun release() {
@@ -108,7 +179,6 @@ class CameraController(private val context: Context) {
     }
 
     fun takePhoto(file: File, onDone: (Result<Photo>) -> Unit) {
-        val pressed = SystemClock.elapsedRealtimeNanos()
         imageCapture.takePicture(mainExecutor, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 val received = SystemClock.elapsedRealtimeNanos()
@@ -116,7 +186,7 @@ class CameraController(private val context: Context) {
                     image.use {
                         val exposure = sensorToElapsed(it.imageInfo.timestamp, received)
                         writeJpeg(it, file)
-                        Photo(file, exposure, pressed)
+                        Photo(file, exposure)
                     }
                 })
             }
@@ -127,14 +197,11 @@ class CameraController(private val context: Context) {
         })
     }
 
-    val isRecording: Boolean get() = recording != null
-
     @SuppressLint("MissingPermission")
-    fun startVideo(file: File, withAudio: Boolean, onStarted: (approxStartElapsed: Long) -> Unit, onDone: (Video) -> Unit) {
+    fun startVideo(file: File, onDone: (Video) -> Unit) {
         check(recording == null) { "Already recording" }
         var bestStart = Long.MAX_VALUE
-        var started = false
-        val audioOk = withAudio && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+        val audioOk = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         val pending = recorder.prepareRecording(context, FileOutputOptions.Builder(file).build())
             .apply { if (audioOk) withAudioEnabled() }
@@ -144,21 +211,19 @@ class CameraController(private val context: Context) {
                 is VideoRecordEvent.Status -> {
                     val d = event.recordingStats.recordedDurationNanos
                     if (d > 0) bestStart = minOf(bestStart, now - d)
-                    if (!started) {
-                        started = true
-                        onStarted(if (bestStart != Long.MAX_VALUE) bestStart else now)
-                    }
                 }
                 is VideoRecordEvent.Finalize -> {
                     recording = null
+                    isRecording = false
                     val d = event.recordingStats.recordedDurationNanos
                     val start = if (bestStart != Long.MAX_VALUE) bestStart else now - d
                     val err = if (event.hasError()) "error ${event.error}: ${event.cause?.message ?: ""}" else null
-                    onDone(Video(file, start, start + d, err))
+                    onDone(Video(file, start, d, err))
                 }
                 else -> Unit
             }
         }
+        isRecording = true
     }
 
     fun stopVideo() {

@@ -18,13 +18,13 @@ object Exporter {
     private val storedExtensions = setOf("jpg", "jpeg", "mp4", "m4a")
 
     /**
-     * Zips the session folder into Downloads/observ/<session>.zip and returns its content Uri,
-     * which can be handed straight to a share intent.
+     * Zips [dir] into Downloads/observ/[fileName] and returns its content Uri, which can be
+     * handed straight to a share intent.
      */
-    fun exportToDownloads(context: Context, session: Session, onProgress: (Float) -> Unit = {}): Uri {
+    fun exportToDownloads(context: Context, dir: File, fileName: String, onProgress: (Float) -> Unit = {}): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, "${session.name}.zip")
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
             put(MediaStore.Downloads.MIME_TYPE, "application/zip")
             put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/observ")
             put(MediaStore.Downloads.IS_PENDING, 1)
@@ -32,7 +32,7 @@ object Exporter {
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: error("Could not create file in Downloads")
         try {
-            resolver.openOutputStream(uri)!!.use { zip(session.dir, it, onProgress) }
+            resolver.openOutputStream(uri)!!.use { zip(dir, fileName.removeSuffix(".zip"), it, onProgress) }
             values.clear()
             values.put(MediaStore.Downloads.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
@@ -43,14 +43,14 @@ object Exporter {
         return uri
     }
 
-    private fun zip(dir: File, out: OutputStream, onProgress: (Float) -> Unit) {
-        val files = dir.listFiles()?.filter { it.isFile }?.sortedBy { it.name } ?: emptyList()
+    private fun zip(dir: File, folderName: String, out: OutputStream, onProgress: (Float) -> Unit) {
+        val files = dir.listFiles()?.filter { it.isFile && !it.name.startsWith(".") }?.sortedBy { it.name } ?: emptyList()
         val total = files.sumOf { it.length() }.coerceAtLeast(1)
         var done = 0L
         val buf = ByteArray(256 * 1024)
         ZipOutputStream(out.buffered()).use { zos ->
             for (f in files) {
-                val entry = ZipEntry("${dir.name}/${f.name}").apply { time = f.lastModified() }
+                val entry = ZipEntry("$folderName/${f.name}").apply { time = f.lastModified() }
                 if (f.extension.lowercase() in storedExtensions) {
                     entry.method = ZipEntry.STORED
                     entry.size = f.length()

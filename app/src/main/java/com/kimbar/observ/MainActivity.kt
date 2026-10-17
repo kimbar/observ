@@ -1,6 +1,7 @@
 package com.kimbar.observ
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -24,18 +25,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.kimbar.observ.data.Session
 import com.kimbar.observ.ui.AppState
 import com.kimbar.observ.ui.HomeScreen
-import com.kimbar.observ.ui.SessionScreen
-import com.kimbar.observ.ui.SyncScreen
-import java.io.File
+import com.kimbar.observ.ui.ItemScreen
+import com.kimbar.observ.ui.SyncsScreen
+import com.kimbar.observ.ui.TestScreen
 
 private val permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
 
@@ -51,11 +52,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Navigation is a back stack of routes kept as one saveable string:
+ * `test/<dir>`, `item/<dir>/<itemId>`, `syncs/<dir>`, separated by '|'.
+ */
 @Composable
 private fun App() {
     val context = LocalContext.current
     val app = remember { AppState(context) }
-    fun granted() = permissions.all { ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
+    fun granted() = permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
     var hasPermissions by remember { mutableStateOf(granted()) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         hasPermissions = granted()
@@ -74,20 +79,33 @@ private fun App() {
         return
     }
 
-    // Navigation: the open session (by folder path, survives recreation) and whether Sync is on top.
-    var sessionPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    var syncOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    val session = sessionPath?.let { Session(File(it)) }
+    var stackText by rememberSaveable { mutableStateOf("") }
+    val stack = stackText.split('|').filter { it.isNotEmpty() }
+    fun push(route: String) { stackText = (stack + route).joinToString("|") }
+    fun pop() { stackText = stack.dropLast(1).joinToString("|") }
 
-    when {
-        syncOpen -> {
-            BackHandler { syncOpen = false }
-            SyncScreen(app, session, onBack = { syncOpen = false })
-        }
-        session != null -> {
-            BackHandler { sessionPath = null }
-            SessionScreen(app, session, onBack = { sessionPath = null }, onSync = { syncOpen = true })
-        }
-        else -> HomeScreen(app, onOpen = { sessionPath = it.dir.absolutePath }, onSync = { syncOpen = true })
+    val top = stack.lastOrNull()?.split('/')
+    val test = top?.getOrNull(1)?.let { app.store.find(it) }
+    if (top != null && test == null) {
+        LaunchedEffect(stackText) { stackText = "" }
+        return
+    }
+    if (top != null) BackHandler { pop() }
+
+    when (top?.first()) {
+        null -> HomeScreen(app) { h -> push("test/${h.dir.name}") }
+        "test" -> TestScreen(
+            app, test!!, onBack = { pop() },
+            onOpenItem = { push("item/${test.dir.name}/${it.id}") },
+            onSyncs = { push("syncs/${test.dir.name}") },
+        )
+        "item" -> ItemScreen(
+            app, test!!, top!![2], onBack = { pop() },
+            onSyncs = { push("syncs/${test.dir.name}") },
+        )
+        "syncs" -> SyncsScreen(
+            app, test!!, onBack = { pop() },
+            onOpenItem = { push("item/${test.dir.name}/$it") },
+        )
     }
 }

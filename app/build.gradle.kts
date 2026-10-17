@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 // Release signing comes from keystore.properties (local builds) or OBSERV_* environment
@@ -75,5 +76,6 @@ dependencies {
     implementation(libs.androidx.camera.video)
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.exifinterface)
+    implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
 }
