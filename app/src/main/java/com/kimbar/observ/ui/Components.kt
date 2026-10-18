@@ -28,6 +28,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -94,7 +102,31 @@ fun FormatSwitch(app: AppState) {
     }
 }
 
-/** Big live test clock, or "not synced", with the local time beneath. */
+/**
+ * Single-line text that shrinks to fit its width (down to [minSize]) instead of wrapping or
+ * colliding with neighbours.
+ */
+@Composable
+fun FittedText(
+    text: String,
+    maxSize: TextUnit,
+    modifier: Modifier = Modifier,
+    minSize: TextUnit = 10.sp,
+    style: TextStyle = LocalTextStyle.current,
+    color: Color = Color.Unspecified,
+) {
+    val c = color.takeOrElse { style.color.takeOrElse { LocalContentColor.current } }
+    BasicText(
+        text,
+        modifier = modifier,
+        style = style.copy(color = c),
+        maxLines = 1,
+        softWrap = false,
+        autoSize = TextAutoSize.StepBased(minFontSize = minSize, maxFontSize = maxSize, stepSize = 1.sp),
+    )
+}
+
+/** Big live test clock (or "not synced") on its own line, the local time small beneath it. */
 @Composable
 fun TestClock(app: AppState, tt: TestTime, modifier: Modifier = Modifier) {
     var counter by remember { mutableLongStateOf(app.clock.counter()) }
@@ -107,12 +139,12 @@ fun TestClock(app: AppState, tt: TestTime, modifier: Modifier = Modifier) {
     val now = app.clock.at(counter)
     val t = tt.testTimeNs(now)
     androidx.compose.foundation.layout.Column(modifier) {
-        Text(
+        FittedText(
             if (t != null) Fmt.testTime(t, app.format) else "not synced",
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (t != null) 44.sp else 32.sp,
+            maxSize = if (t != null) 72.sp else 40.sp,
+            style = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
             color = if (t != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+            modifier = Modifier.fillMaxWidth(),
         )
         Text(
             "local ${Fmt.localClock(now.epochNs)}",

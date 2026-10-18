@@ -23,6 +23,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -196,17 +203,7 @@ fun TestScreen(app: AppState, test: TestHandle, onBack: () -> Unit, onOpenItem: 
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(test.data.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = onBack, enabled = !recording) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                },
-                actions = { FormatSwitch(app) },
-            )
-        },
-    ) { pad ->
+    Scaffold { pad ->
         Column(
             Modifier
                 .padding(pad)
@@ -214,13 +211,30 @@ fun TestScreen(app: AppState, test: TestHandle, onBack: () -> Unit, onOpenItem: 
                 .imePadding()
                 .padding(horizontal = 12.dp),
         ) {
+            // 1: back + test name
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TestClock(app, tt, Modifier.weight(1f))
+                FilledTonalIconButton(onClick = onBack, enabled = !recording) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                }
+                Spacer(Modifier.width(8.dp))
+                FittedText(
+                    test.data.name,
+                    maxSize = 24.sp,
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            // 2: format switch + syncs
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                FormatSwitch(app)
+                Spacer(Modifier.weight(1f))
                 FilledTonalButton(onClick = onSyncs) {
                     val n = tt.activeSyncs.size
                     Text(if (n == 0) "Syncs" else "Syncs $n · ±${Fmt.delta(tt.spreadNs ?: 0).drop(1)}")
                 }
             }
+            // 3 + 4: big timer, local time
+            TestClock(app, tt, Modifier.fillMaxWidth())
             if (test.data.bootBases.size > 1) Text(
                 "The phone rebooted during this test; later times are bridged via the phone clock.",
                 color = MaterialTheme.colorScheme.error,
@@ -302,11 +316,13 @@ fun TestScreen(app: AppState, test: TestHandle, onBack: () -> Unit, onOpenItem: 
 
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
             val syncCounts = test.data.syncs.groupingBy { it.itemId }.eachCount()
-            LazyColumn(Modifier.weight(1f)) {
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(test.data.items.sortedByDescending { tt.timeline(it.moment) }, key = { it.id }) { item ->
-                    ItemRow(item, tt, app, syncCounts[item.id] ?: 0) {
-                        if (item.active) onOpenItem(item) else toActivate = item
-                    }
+                    ItemRow(
+                        item, tt, app, syncCounts[item.id] ?: 0,
+                        onOpen = { if (item.active) onOpenItem(item) else toActivate = item },
+                        onSetActive = { active -> test.update { TestOps.setItemActive(it, item.id, active) } },
+                    )
                 }
             }
         }
@@ -328,28 +344,64 @@ fun TestScreen(app: AppState, test: TestHandle, onBack: () -> Unit, onOpenItem: 
     }
 }
 
+/** One item of a Test: a framed card with its test time, type, details and an actions menu. */
 @Composable
-fun ItemRow(item: Item, tt: TestTime, app: AppState, syncCount: Int, onClick: () -> Unit) {
-    val small = !item.active
-    val style = if (small) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodyMedium
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = if (small) 1.dp else 6.dp)
-            .inactiveStyle(item.active),
-        verticalAlignment = Alignment.CenterVertically,
+fun ItemRow(
+    item: Item,
+    tt: TestTime,
+    app: AppState,
+    syncCount: Int,
+    onOpen: () -> Unit,
+    onSetActive: (Boolean) -> Unit,
+) {
+    val active = item.active
+    val style = if (active) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall
+    var menu by remember { mutableStateOf(false) }
+    OutlinedCard(
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth().inactiveStyle(active),
     ) {
-        Text(tt.label(item.moment, app.format), fontFamily = FontFamily.Monospace, style = style, modifier = Modifier.width(if (small) 72.dp else 96.dp))
-        Text(item.type.name, style = style, modifier = Modifier.width(if (small) 44.dp else 60.dp))
-        val detail = when (item.type) {
-            ItemType.NOTE -> item.text.replace('\n', ' ')
-            ItemType.VIDEO, ItemType.AUDIO -> item.end?.let { "%.1f s".format((it.counterNs - item.moment.counterNs) / 1e9) } ?: ""
-            else -> ""
+        Row(
+            Modifier.padding(start = 12.dp, top = if (active) 6.dp else 0.dp, bottom = if (active) 6.dp else 0.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(tt.label(item.moment, app.format), fontFamily = FontFamily.Monospace, style = style)
+                    Spacer(Modifier.width(10.dp))
+                    Text(item.type.name, style = style, fontWeight = FontWeight.Bold)
+                    if (syncCount > 0) Text("  ⟲$syncCount", style = style, color = MaterialTheme.colorScheme.primary)
+                    if (!active) Text("  inactive", style = style)
+                }
+                val detail = when (item.type) {
+                    ItemType.NOTE -> item.text.replace('\n', ' ')
+                    ItemType.VIDEO, ItemType.AUDIO ->
+                        item.end?.let { "%.1f s".format((it.counterNs - item.moment.counterNs) / 1e9) } ?: ""
+                    else -> ""
+                }
+                if (detail.isNotEmpty() && active) Text(
+                    detail,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Actions") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (active) {
+                        DropdownMenuItem(
+                            text = { Text(if (item.type == ItemType.NOTE) "Open / edit" else "Open") },
+                            onClick = { menu = false; onOpen() },
+                        )
+                        if (item.canSync) DropdownMenuItem(text = { Text("Add sync…") }, onClick = { menu = false; onOpen() })
+                        DropdownMenuItem(text = { Text("Deactivate") }, onClick = { menu = false; onSetActive(false) })
+                    } else {
+                        DropdownMenuItem(text = { Text("Activate") }, onClick = { menu = false; onSetActive(true) })
+                    }
+                }
+            }
         }
-        Text(detail, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (syncCount > 0) Text("⟲$syncCount", style = style, color = MaterialTheme.colorScheme.primary)
-        if (!item.active) Text(" inactive", style = style)
     }
 }
 
