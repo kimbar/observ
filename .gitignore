@@ -9,3 +9,6 @@ build/
 *.jks
 *.keystore
 keystore.properties
+
+# local screenshots / UI dumps from adb
+shots/

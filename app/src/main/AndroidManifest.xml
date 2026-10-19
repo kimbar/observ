@@ -10,7 +10,7 @@
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
-        android:label="observ"
+        android:label="${appLabel}"
         android:supportsRtl="true"
         android:theme="@style/Theme.Observ">
         <!-- Portrait-locked so a rotation never restarts the activity mid-recording;

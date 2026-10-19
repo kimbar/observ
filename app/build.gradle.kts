@@ -41,7 +41,15 @@ android {
     }
 
     buildTypes {
+        // Debug builds install next to the release app (own id and name), so local testing
+        // never replaces or wipes the app used for real Tests.
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            manifestPlaceholders["appLabel"] = "observ debug"
+        }
         release {
+            manifestPlaceholders["appLabel"] = "observ"
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")
         }
