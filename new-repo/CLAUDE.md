@@ -16,8 +16,13 @@ observer that starts at 00:00 and counts up. The phone is synced to that clock b
 off a MARK, a photo or a video frame; several syncs are averaged. Times are kept and shown at
 **0.1 s precision** for reliable **1 s accuracy**.
 
-The app is sideloaded onto a few phones (no app store). The main target phone is a
-**Samsung Galaxy A56** (6.7", 1080 × 2340, Android 15/16, One UI).
+The app is sideloaded (no app store) onto **general, modern Android devices**: phones of all
+common sizes, foldables and tablets, with varying hardware (cameras, microphone). The UI must
+be **fully responsive**; see `DESIGN.md` sections 2 and 8.
+
+The user's **Samsung Galaxy A56** (6.7", 1080 × 2340, One UI) is the reference phone for
+development and can be connected over USB, but it is **not the target**: never tune layouts or
+behaviour to it, and never rely on Samsung-specific behaviour.
 
 ### The specification
 
@@ -27,6 +32,16 @@ The app is sideloaded onto a few phones (no app store). The main target phone is
 - Do not "improve" behaviour it defines without asking. If something in it looks wrong or
   incomplete, raise it with the user first.
 - When the user agrees to a change, update `DESIGN.md` in the same piece of work.
+- Items marked **(to confirm)** in `DESIGN.md` are not agreed yet; ask before building them.
+
+### The user edits these documents by hand
+
+The user prunes and expands `DESIGN.md` and this `CLAUDE.md` manually. Therefore:
+
+- Always re-read the current file before editing it; never work from memory of an older version.
+- Make **small, targeted edits**. Do not rewrite, reorder or reformat sections you were not
+  asked to change, and do not restore text the user removed.
+- Keep both files readable for humans: plain language, short sections, tables where they help.
 
 ---
 
@@ -105,13 +120,21 @@ emulator -list-avds
 
 ## 5. Devices
 
-### 5.1 Emulator (default for UI checks)
+### 5.1 Emulators (default for UI checks)
 
-The virtual device is set up in Android Studio's Device Manager as **`Galaxy_A56`**:
-custom hardware profile, 6.7", 1080 × 2340, Android 15 (API 35) or 16 (API 36), x86_64,
-Google APIs image; back and front camera = **Webcam0**.
+Because the app targets many devices, UI is checked on **a set of virtual devices**, created
+once in Android Studio's Device Manager (x86_64, Google APIs images; cameras = Webcam0 where
+the device has them):
 
-Start it and wait until it has booted:
+| AVD name | Represents | Profile | Android |
+|---|---|---|---|
+| `Small_Phone` | small / older phone | Android Studio "Small Phone" | 10 (API 29), the minimum |
+| `Galaxy_A56` | typical large phone (reference) | custom: 6.7", 1080 × 2340 | 15 (API 35) |
+| `Foldable` | foldable, medium width | Android Studio "Pixel 9 Pro Fold" (or any fold-in profile) | 15–16 |
+| `Tablet` | tablet, expanded width | Android Studio "Pixel Tablet" | 15–16 |
+| `No_Camera` | device without cameras | any phone profile, cameras set to None | 15 |
+
+Start one and wait until it has booted:
 
 ```
 emulator -list-avds
@@ -121,13 +144,22 @@ adb shell getprop sys.boot_completed      # repeat until it prints 1
 adb devices                               # must show: emulator-5554   device
 ```
 
-What the emulator cannot tell you: Samsung One UI specifics, the ultra-wide lens, real
-camera behaviour, real touch feel, or timing precision. Use the phone for those.
+Quick size checks without another AVD (resets on reboot; always reset afterwards):
+
+```
+adb shell wm size 720x1280      # pretend a smaller screen
+adb shell wm density 320
+adb shell wm size reset
+adb shell wm density reset
+```
+
+What emulators cannot tell you: real camera behaviour, the ultra-wide lens, touch feel,
+timing precision, manufacturer quirks (e.g. Samsung One UI). Use a real device for those.
 
 The emulator's microphone only works after enabling *Extended controls → Microphone →
 "Virtual microphone uses host audio input"* (resets on every start).
 
-### 5.2 The real phone (A56 over USB)
+### 5.2 The reference phone (A56 over USB)
 
 Developer options → **USB debugging** on; accept the prompt on the phone when plugging in.
 Use it for camera, wide lens, audio, timing and final checks.
@@ -220,14 +252,34 @@ recompositions take time.
 
 ### 6.4 What to check on every UI change
 
+Screen sizes and orientations (the UI must be responsive, see `DESIGN.md` section 8):
+
+- At least a **compact** device (`Small_Phone` or `Galaxy_A56`) and an **expanded** one
+  (`Tablet`) for every UI change; add `Foldable` for layout changes.
+- **Both orientations.** Rotate with:
+  ```
+  adb shell settings put system accelerometer_rotation 0
+  adb shell settings put system user_rotation 1     # 0 portrait, 1 landscape, 3 reverse landscape
+  adb shell settings put system user_rotation 0
+  ```
+- Rotate **during** a running audio/video recording and while typing a note: nothing may be
+  lost or interrupted.
+
+Content and appearance:
+
 - Nothing overlaps or is cut off; long Test names and the longest timer text
   (`-0:01:23.4`, `999:59.9`) fit.
 - Both time formats (MMM:SS and H:MM:SS switch).
 - Light and dark theme: `adb shell cmd uimode night yes` / `no`.
-- Large fonts: `adb shell settings put system font_scale 1.3`, then back to `1.0`.
+- Large fonts: `adb shell settings put system font_scale 1.5` (also try `2.0`), then `1.0`.
 - Inactive items look diminished; active ones are clearly readable.
-- Before/after: when changing an existing screen, take a screenshot before the change too
-  and compare.
+- On `No_Camera` (and with permissions refused): unavailable buttons are hidden or explain
+  themselves, and everything else works.
+- Before/after: when changing an existing screen, take a screenshot before the change too and
+  compare.
+
+Name screenshots so the device and state are clear, e.g.
+`shots/tablet_landscape_test-screen_synced.png`.
 
 ### 6.5 Checking data, not just pixels
 
@@ -311,6 +363,20 @@ Upgrade deliberately, one thing at a time, with a full visual check afterwards.
 - **`media/`**: camera, audio, video frame access.
 - **`ui/`**: Compose screens; state in the model, not in screens.
 
+### Responsive UI and device differences
+
+- Choose layouts from **window size classes** (`androidx.compose.material3.adaptive` /
+  `currentWindowAdaptiveInfo()`), never from device models or pixel sizes.
+- Do **not** lock the screen orientation. State that must survive rotation and resizing
+  (recordings in progress, camera, typed text, open dialogs) lives outside the composable that
+  shows it: in a ViewModel, or for recordings in a component whose lifetime is the Test, not
+  the screen.
+- Detect hardware at runtime (`PackageManager.hasSystemFeature`, CameraX
+  `hasCamera(...)`, ultra-wide detection) and declare camera and microphone as
+  `android:required="false"` in the manifest, so devices without them can install the app.
+- Every size and spacing in `dp`/`sp`, every flexible area with weights; single-line text that
+  must fit uses auto-sizing text.
+
 ### Timing techniques (keep these when rebuilding)
 
 - Every moment is captured as `SystemClock.elapsedRealtimeNanos()` plus boot count plus the
@@ -342,8 +408,8 @@ Upgrade deliberately, one thing at a time, with a full visual check afterwards.
 A change is done when:
 
 1. `gradlew testDebugUnitTest` passes (and new logic in `model/` has tests).
-2. It was built, installed and checked visually per section 6 (UI changes), on the phone
-   where device features are involved.
+2. It was built, installed and checked visually per section 6 (UI changes): on a compact and
+   an expanded device, in both orientations, and on a real device where hardware is involved.
 3. `DESIGN.md` reflects any agreed behaviour change.
 4. The user has seen the relevant screenshots and agreed.
 5. It is committed (when asked) with a clear message; `[skip ci]` unless a release is wanted.
